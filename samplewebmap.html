@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Map Application</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css"/>
+  <style>
+    body, html {
+      height: 100%;
+      margin: 0;
+    }
+    #map {
+      height: 100%;
+    }
+    .legend {
+      background: white;
+      padding: 10px;
+      border: 3px solid #ccc;
+      border-radius: 5px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+      font-size: 12px;
+      line-height: 18px;
+      position: absolute;
+      top: 80px;
+      right: 0px;
+      z-index: 1000;
+    }
+    .legend i {
+      width: 22px;
+      height: 8px;
+      float: left;
+      margin-right: 10px;
+      opacity: 0.7;
+    }
+    .popup-buttons {
+      display: flex;
+      justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+  <script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
+  <script src="https://unpkg.com/@turf/turf"></script>
+  <script>
+    const map = L.map('map').setView([31.963158, 35.930359], 7);  // Coordinates for Jordan
+
+    // OpenStreetMap Layer
+    const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Satellite Layer
+    const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+    });
+
+    let highwayLayer, locationLayer;
+    let drawnItems = new L.FeatureGroup();
+
+    // Load and add highway GeoJSON data as a layer to the map
+    fetch('https://raw.githubusercontent.com/Musa07/JordanData-in-Geojason/main/jordan_highway.json')
+      .then(response => response.json())
+      .then(data => {
+        highwayLayer = L.geoJSON(data, {
+          style: {
+            color: 'brown'
+          },
+          onEachFeature: function (feature, layer) {
+            if (feature.properties) {
+              layer.bindPopup('<pre>' + JSON.stringify(feature.properties, null, ' ').replace(/[\{\}"]/g, '') + '</pre>');
+            }
+          }
+        });
+      });
+
+    // Load and add location GeoJSON data as a layer to the map
+    fetch('https://raw.githubusercontent.com/Musa07/JordanData-in-Geojason/main/jordan_location.json')
+      .then(response => response.json())
+      .then(data => {
+        locationLayer = L.geoJSON(data, {
+          pointToLayer: function (feature, latlng) {
+            return L.circleMarker(latlng, {
+              radius: 2,
+              fillColor: 'green',
+              color: '#000',
+              weight: 1,
+              opacity: 1,
+              fillOpacity: 0.8
+            });
+          },
+          onEachFeature: function (feature, layer) {
+            if (feature.properties) {
+              layer.bindPopup('<pre>' + JSON.stringify(feature.properties, null, ' ').replace(/[\{\}"]/g, '') + '</pre>');
+            }
+          }
+        });
+      });
+
+    // Create a layer control and add it to the map
+    const baseMaps = {
+      "OpenStreetMap": osmLayer,
+      "Satellite Imagery": satelliteLayer
+    };
+
+    const overlayMaps = {};
+
+    const layerControl = L.control.layers(baseMaps, overlayMaps).addTo(map);
+
+    // Add a legend
+    const legend = L.control({ position: 'topright' });
+    legend.onAdd = function (map) {
+      const div = L.DomUtil.create('div', 'legend');
+      div.innerHTML += '<h4>Legend</h4>';
+      div.innerHTML += '<label><input type="checkbox" id="highwayCheckbox" checked>Highway</label><br>';
+      div.innerHTML += '<label><input type="checkbox" id="locationCheckbox" checked>Location</label><br>';
+      return div;
+    };
+    legend.addTo(map);
+
+    // Toggle highway layer based on checkbox
+    document.getElementById('highwayCheckbox').addEventListener('change', function() {
+      if (this.checked) {
+        highwayLayer.addTo(map);
+      } else {
+        map.removeLayer(highwayLayer);
+      }
+    });
+
+    // Toggle location layer based on checkbox
+    document.getElementById('locationCheckbox').addEventListener('change', function() {
+      if (this.checked) {
+        locationLayer.addTo(map);
+      } else {
+        map.removeLayer(locationLayer);
+      }
+    });
+
+    // Add a search bar
+    const searchControl = L.Control.geocoder({
+      defaultMarkGeocode: false,
+      position: 'topleft'
+    }).on('markgeocode', function(e) {
+      const latlng = e.geocode.center;
+      map.flyTo(latlng, 14);
+
+      // Highlight the matched feature
+      const layer = e.geocode.layer;
+      if (layer instanceof L.Marker) {
+        layer.openPopup();
+      } else if (layer instanceof L.Path) {
+        layer.setStyle({ color: 'red' }); // Change the style to highlight the feature
+      }
+    }).addTo(map);
+
+    // Add measuring tool (only for lines)
+    const measureControl = new L.Control.Draw({
+      draw: {
+        polyline: {
+          shapeOptions: {
+            color: 'purple'
+          },
+          metric: true,
+          feet: false
+        },
+        polygon: false,
+        circle: false,
+        marker: false,
+        circlemarker: false
+      },
+      edit: {
+        featureGroup: drawnItems
+      }
+    });
+    map.addControl(measureControl);
+
+    // Handle the deletion of drawn features
+    map.on('draw:created', function (e) {
+      const type = e.layerType;
+      const layer = e.layer;
+
+      if (type === 'polyline') {
+        const popupContent = `
+          Distance: ${turf.length(layer.toGeoJSON(), { units: 'kilometers' }).toFixed(2)} kilometers
+          <br><button onclick="deleteLine(${L.stamp(layer)})">Delete</button>
+        `;
+        layer.bindPopup(popupContent);
+
+        layer.on('contextmenu', function(e) {
+          e.target.unbindPopup();
+          drawnItems.removeLayer(e.target);
+        });
+      }
+
+      drawnItems.addLayer(layer);
+      layer.addTo(map);
+    });
+
+    // Function to delete the line
+    function deleteLine(id) {
+      const layer = drawnItems.getLayer(id);
+      drawnItems.removeLayer(layer);
+    }
+
+    // Function to clear all drawn items
+    function clearAll() {
+      drawnItems.clearLayers();
+    }
+
+  </script>
+</body>
+</html>
